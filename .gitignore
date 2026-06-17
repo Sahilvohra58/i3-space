@@ -1,0 +1,56 @@
+# =============================================================================
+# Secrets — NEVER commit
+# =============================================================================
+**/.env
+**/.env.local
+**/.env.*.local
+backend/credentials/service_account.json
+backend/credentials/*.json
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# =============================================================================
+# Node / Vite
+# =============================================================================
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =============================================================================
+# Editors / OS
+# =============================================================================
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# =============================================================================
+# Build / deploy artefacts
+# =============================================================================
+.vercel/
+.railway/
+backups/
+.playwright-mcp/
+.codebase-memory/
+
+# Local screenshots from tests
+board-with-sample-data.png
+board-loaded.png
