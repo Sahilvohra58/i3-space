@@ -35,17 +35,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Log in to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Update Container App to new revision
-        uses: azure/cli@v2
-        with:
-          azcliversion: latest
-          inlineScript: |
-            az containerapp update \
-              --name i3space-backend \
-              --resource-group rg-shared-prod \
-              --image i3spacecr.azurecr.io/i3space-backend:latest
+      - name: Next steps — deploy to Container App
+        run: |
+          echo ""
+          echo "✅ Image pushed to ACR: i3spacecr.azurecr.io/i3space-backend:latest"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  TO DEPLOY (run locally or ask an Owner to run once):"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "  az containerapp update \\"
+          echo "    --name i3space-backend \\"
+          echo "    --resource-group rg-shared-prod \\"
+          echo "    --image i3spacecr.azurecr.io/i3space-backend:latest"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  TO ENABLE AUTO-DEPLOY ON PUSH (one-time setup by Owner):"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "  1. Ask mujtaba.syed@i3institute.ca (Owner) to run:"
+          echo "     az role assignment create \\"
+          echo "       --assignee <SP-app-id> \\"
+          echo "       --role Contributor \\"
+          echo "       --resource-group rg-shared-prod"
+          echo ""
+          echo "  2. Then in Azure Portal → i3space-backend → Settings → Deployment"
+          echo "     → Continuous deployment → connect Sahilvohra58/i3-space (main)"
+          echo "     → Azure Container Registry: i3spacecr / i3space-backend"
+          echo "     → Dockerfile: ./backend/Dockerfile"
+          echo "     → Click 'Start continuous deployment'"
+          echo ""
+          echo "  After step 2, every push to main auto-deploys. No manual step needed."
+          echo ""
