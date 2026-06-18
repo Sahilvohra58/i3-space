@@ -4,7 +4,6 @@ import type { MetricKpi } from "../components/board/MetricKpiGrid";
 export interface SnapshotLike {
   row_index: number;
   date: string;
-  [key: string]: number | string;
 }
 
 export interface SnapshotData<T extends SnapshotLike> {
@@ -33,8 +32,8 @@ export function useSnapshotData<T extends SnapshotLike>(
 
     const kpis: Record<string, MetricKpi> = {};
     metricKeys.forEach((k) => {
-      const current = Number(latest[k] ?? 0);
-      const previous = prev ? Number(prev[k] ?? 0) : null;
+      const current = Number((latest as Record<string, unknown>)[k] ?? 0);
+      const previous = prev ? Number((prev as Record<string, unknown>)[k] ?? 0) : null;
       kpis[k] = {
         value: current,
         delta: previous === null ? null : current - previous,

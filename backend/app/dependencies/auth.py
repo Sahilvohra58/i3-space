@@ -18,23 +18,23 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.services.jwt_service import decode_token
+from app.services.azure_ad import validate_azure_token
 
 
-_bearer = HTTPBearer(auto_error=False, description="Bearer JWT issued by /auth/login")
+_bearer = HTTPBearer(auto_error=False, description="Azure AD Bearer token")
 
 
 def require_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
-    """Validate the Authorization header and return the JWT payload."""
+    """Validate the Authorization header and return the Azure AD token payload."""
     if credentials is None or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
+    payload = validate_azure_token(credentials.credentials)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -18,7 +18,6 @@ export interface SnapshotFieldSpec {
 export interface SnapshotBase {
   row_index: number;
   date: string;
-  [key: string]: number | string;
 }
 
 interface SnapshotTabProps<TSnapshot extends SnapshotBase, TNew extends { date: string }> {
@@ -127,7 +126,7 @@ export default function SnapshotTab<
     const headers = ["date", ...fields.map((f) => f.key)];
     const rows = displayedSnapshots.map((s) => [
       s.date,
-      ...fields.map((f) => Number(s[f.key] ?? 0)),
+      ...fields.map((f) => Number((s as Record<string, unknown>)[f.key] ?? 0)),
     ]);
     const csv = toCsv(headers, rows);
     downloadCsv(`${slugify(title)}-${todayStamp()}.csv`, csv);
@@ -269,7 +268,7 @@ export default function SnapshotTab<
                   <td className="px-4 py-3 whitespace-nowrap text-gray-700">{s.date}</td>
                   {fields.map((f) => (
                     <td key={f.key} className="px-4 py-3 whitespace-nowrap text-gray-700">
-                      {formatCell(Number(s[f.key] ?? 0), f)}
+                      {formatCell(Number((s as Record<string, unknown>)[f.key] ?? 0), f)}
                     </td>
                   ))}
                   <td className="px-4 py-3 text-right">
