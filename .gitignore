@@ -54,3 +54,5 @@ backups/
 # Local screenshots from tests
 board-with-sample-data.png
 board-loaded.png
+
+token

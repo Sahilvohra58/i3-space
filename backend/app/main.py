@@ -67,11 +67,8 @@ _raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
 _origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 # Cloudflare Pages preview deployments all land on *.pages.dev.
-# ALLOW_PAGES_PREVIEWS is checked first; falls back to legacy ALLOW_VERCEL_PREVIEWS.
 # Set to false once you have a stable custom domain.
-_allow_pages = (
-    os.getenv("ALLOW_PAGES_PREVIEWS", os.getenv("ALLOW_VERCEL_PREVIEWS", "true")).lower() == "true"
-)
+_allow_pages = os.getenv("ALLOW_PAGES_PREVIEWS", "true").lower() == "true"
 _origin_regex = r"https://.*\.pages\.dev" if _allow_pages else None
 
 app.add_middleware(
@@ -115,8 +112,7 @@ def healthz():
     }
 
 
-# Legacy alias — kept so existing UptimeRobot monitors and the Vercel pre-warm
-# fetch keep working without re-configuration.
+# Legacy alias kept for existing monitors.
 @app.get("/health", tags=["meta"], include_in_schema=False)
 def health_legacy():
     return {"status": "ok"}

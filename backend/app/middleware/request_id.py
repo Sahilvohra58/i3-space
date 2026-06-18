@@ -1,7 +1,7 @@
 """ASGI middleware that tags every request with a UUID for log correlation.
 
 If the client supplies an `X-Request-ID` header we trust it (handy when chaining
-through Vercel/Cloudflare); otherwise we generate one. The id is echoed back on
+through Cloudflare); otherwise we generate one. The id is echoed back on
 the response and also propagated to a contextvar so log records pick it up.
 """
 

@@ -2,16 +2,10 @@
 
 ## Overview
 
-The i3 Space app is split into two independently deployed services:
-
 | Layer | Platform | URL |
 |---|---|---|
 | Frontend (React/Vite) | Cloudflare Pages | https://i3-space.pages.dev |
 | Backend (FastAPI) | Azure Container Apps | https://i3space-backend.whitepond-61860c90.canadacentral.azurecontainerapps.io |
-
-> **v0.3 — Azure migration:** Backend moved from Railway + Google Sheets to Azure Container Apps + Azure PostgreSQL Flexible Server (private VNet). The database is `i3space` on server `i3-postgressqldb.postgres.database.azure.com`, reachable only within `VNET1` (subnet `default`). Container Apps run in the same VNet (subnet `container-apps`), so they reach the DB privately. Image is stored in ACR (`i3spacecr.azurecr.io`). All secrets live in Azure Container Apps secret store; see the Azure portal for the Container App `i3space-backend` in resource group `rg-shared-prod`.
-
-> **Production hardening (v0.2):** Passwords are bcrypt-hashed, the backend issues JWT bearer tokens (7-day expiry), every data route requires `Authorization: Bearer <token>`, `/auth/login` is rate-limited to 5/min/IP, structured JSON logs include a request-id, and Sentry is plug-in-ready.
 
 ---
 
@@ -19,298 +13,175 @@ The i3 Space app is split into two independently deployed services:
 
 ```
 User Browser
-    │  Authorization: Bearer <JWT>
+    │  Sign in with Microsoft (MSAL)
+    │  Authorization: Bearer <Azure AD ID token>
     ▼
 Cloudflare Pages (frontend)           ← static React/Vite build, global CDN
-    │   HTTPS requests
+    │   HTTPS + Bearer token on every request
     ▼
 Azure Container Apps (backend)        ← FastAPI, Uvicorn, port 8080
-    │   • VNet-integrated (VNET1/container-apps subnet)
-    │   • JWT verify on every protected route
-    │   • slowapi rate-limits /auth/login
-    │   • JSON logs with request_id
+    │   • VNet-integrated (VNET1 / container-apps subnet)
+    │   • Validates Azure AD RS256 ID tokens via JWKS
+    │   • JSON logs with X-Request-ID
     │   private TCP (port 5432)
     ▼
-Azure PostgreSQL Flexible Server      ← private, VNet-only (VNET1/default subnet)
+Azure PostgreSQL Flexible Server      ← VNet-only (VNET1 / default subnet)
+    │   Host: i3-postgressqldb.postgres.database.azure.com
     │   Database: i3space
-    │   Tables: users, channels, tracker_rows, business_snapshots,
-    │           loyalty_snapshots, outreach_snapshots, sponsorship_snapshots,
-    │           media_sales_snapshots, team_snapshots, volunteer_snapshots
+    │   NO public network access — reachable only from within VNET1
 ```
 
 ---
 
-## Authentication & security
+## Authentication
+
+All auth is handled by **Azure AD (Microsoft Entra ID)** — there is no username/password login.
 
 ### Login flow
 
-1. User POSTs `{email, password}` to `/auth/login`.
-2. Backend queries the `users` table in PostgreSQL, verifies the password against the bcrypt hash, and on success issues a JWT signed with `JWT_SECRET` (HS256, 7-day expiry by default).
-3. Frontend stores the JWT in `localStorage` (`i3.access_token`).
-4. Every subsequent request is sent with `Authorization: Bearer <token>` by a shared axios interceptor (`frontend/src/api/client.ts`).
-5. Any backend response with status `401` triggers the frontend to clear the session and bounce back to the login page.
+1. Frontend calls `msalInstance.loginRedirect()` → user authenticates with their i3 Institute Microsoft account.
+2. Microsoft issues an ID token (RS256) to the browser.
+3. MSAL stores the token in `sessionStorage`; the axios request interceptor calls `acquireTokenSilent()` to attach it as `Authorization: Bearer <id-token>` on every API call.
+4. Backend validates the token via the Azure AD JWKS endpoint (`https://login.microsoftonline.com/{tenantId}/discovery/v2.0/keys`), checking audience, issuer, and expiry.
+5. Any `401` response triggers `msalInstance.loginRedirect()` — the user is bounced back through Microsoft login.
+
+### Access control
+
+Only users explicitly added to the **i3space-app** Enterprise Application can sign in. Everyone else is blocked by Microsoft before reaching the app.
+
+See [adding-users.md](adding-users.md) for how to add/remove users.
 
 ### What's protected
 
 | Endpoint | Auth required? |
 |---|---|
-| `POST /auth/login` | No (rate-limited to `LOGIN_RATE_LIMIT`, default `5/minute/IP`) |
-| `GET /auth/me` | Yes (used by the frontend to validate a stored token on page-load) |
 | `GET /healthz`, `GET /health` | No |
-| `GET/POST/DELETE /tracker/...`, `/volunteers/...`, `/loyalty/...`, `/outreach/...`, `/business/...`, `/sponsorships/...`, `/media-sales/...`, `/team/...` | **Yes** |
-
-A missing or invalid token returns `401 {"detail": "Missing bearer token"}` or `401 {"detail": "Invalid or expired token"}`.
-
-### Password storage
-
-Passwords are bcrypt-hashed and stored in the `users` table in PostgreSQL (`email`, `password_hash` columns). On first startup the backend seeds the initial user from `INITIAL_USER_EMAIL` / `INITIAL_USER_PASSWORD` environment variables (set in the Container App secrets in the Azure portal).
-
-### Rotating the JWT secret
-
-Update the `jwt-secret` secret in the Container App and create a new revision. This invalidates all outstanding tokens (everyone is forced to log in again).
-
-### Adding a user
-
-Currently done via direct SQL on the PostgreSQL server (accessible from within the VNet). A future admin endpoint can be added to the API.
+| `GET /auth/me` | Yes — returns `{email, name, oid}` from Azure AD token claims |
+| All data routes (`/tracker`, `/volunteers`, `/loyalty`, `/outreach`, `/business`, `/sponsorships`, `/media-sales`, `/team`) | **Yes** |
 
 ---
 
-## Secrets & Token Storage
+## CI/CD
 
-All credentials and deployment tokens are kept in the **`tokens` sheet** of the Google Sheet:
+### Backend — GitHub Actions + ACR
 
-> **Google Sheet:** [i3-space-credentials](https://docs.google.com/spreadsheets/d/1XDSB_93xKEcM28GZ1ZtVUhhu6MEbouTbUIGwlOlfvHo)  
-> **Sheet tab:** `tokens`
+Any push to `main` that touches `backend/**` triggers `.github/workflows/deploy-backend.yml`:
 
-| Row | Key | Value | Notes |
-|---|---|---|---|
-| 2 | `RAILWAY_PROJECT_TOKEN` | `<see tokens sheet>` | Project-scoped token for `railway up` deploys (i3-space-deploy, production) |
-| 3 | `CF_ACCOUNT_EMAIL` | `sahil@i3institute.ca` | Cloudflare account email |
-| 4 | `CF_ACCOUNT_ID` | `<see tokens sheet>` | Cloudflare account ID (Sahil@i3institute.ca's Account) |
-| 5 | `CF_PAGES_API_TOKEN` | `<see tokens sheet>` | API token with Cloudflare Pages: Edit permission |
-| 6 | `CF_PAGES_PROJECT_NAME` | `i3-space` | Cloudflare Pages project name |
-| 7 | `CF_FRONTEND_URL` | `https://i3-space.pages.dev` | Live production frontend URL |
-| 8 | `RAILWAY_BACKEND_URL` | `https://comfortable-patience-production-82bf.up.railway.app` | Live production backend URL |
-| 9 | `RAILWAY_PROJECT_ID` | `a0520d55-d84a-4ad8-bb56-1985c5faf46e` | Railway project UUID |
-| 10 | `RAILWAY_SERVICE_ID` | `f4ebcabb-e99c-4023-b9ae-6f03e0e79bc1` | Railway service UUID (used with `--service` flag) |
-| 11 | `GOOGLE_SPREADSHEET_ID` | `1XDSB_93xKEcM28GZ1ZtVUhhu6MEbouTbUIGwlOlfvHo` | Google Sheet ID used as app database |
-| 12 | `GOOGLE_SERVICE_ACCOUNT` | `i3-space-tracker@eat-ingredient.iam.gserviceaccount.com` | Service account email for Google Sheets API |
+1. Builds a Docker image from `backend/Dockerfile`.
+2. Pushes it to ACR as `i3spacecr.azurecr.io/i3space-backend:latest`.
 
-**When you generate a new token on any platform, add a row immediately** with the key name, value, and a short note describing its scope and purpose.
-
----
-
-## Backend — Railway
-
-### First-time setup (already done)
-
-1. Created account at [railway.com](https://railway.com) with `vohrasahil58@gmail.com`
-2. Connected GitHub to unlock the Trial plan (removes network restrictions — no code is pushed to GitHub; this is just for account verification)
-3. Created a project named **comfortable-patience**
-4. Generated a project-scoped token (`i3-space-deploy`) and saved it to the `tokens` sheet
-
-### Deploying
-
-The backend is deployed directly from the local `backend/` folder via the Railway CLI — no GitHub push required.
+After the push, **run locally** to deploy the new image to Container Apps:
 
 ```bash
-cd backend
-RAILWAY_TOKEN=<RAILWAY_PROJECT_TOKEN from tokens sheet> \
-  railway up --detach --service f4ebcabb-e99c-4023-b9ae-6f03e0e79bc1
+az containerapp update \
+  --name i3space-backend \
+  --resource-group rg-shared-prod \
+  --image i3spacecr.azurecr.io/i3space-backend:latest
 ```
 
-Railway uses **Nixpacks** to auto-detect Python, install dependencies from `requirements.txt`, and start the server using the command in `railway.toml`:
+> **Why the manual step?** Sahil is Contributor on `rg-shared-prod`, not Owner, so the GitHub Actions service principal can't be granted the Contributor role needed for Container Apps deployment. Once Mujtaba grants the role (or sets up Continuous Deployment in the portal), this step can be automated. See `docs/tech-debt.md`.
 
-```toml
-[deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
-```
+#### Required GitHub Actions secrets
 
-### Environment variables (set in Railway dashboard)
+| Secret | Value |
+|---|---|
+| `ACR_USERNAME` | ACR admin username (from Azure Portal → i3spacecr → Access keys) |
+| `ACR_PASSWORD` | ACR admin password (same page) |
 
-Navigate to:  
-`Project → comfortable-patience → Variables`
+### Frontend — Cloudflare Pages (GitHub connected)
 
-| Variable | Value | Required | Notes |
-|---|---|---|---|
-| `SPREADSHEET_ID` | `1XDSB_93xKEcM28GZ1ZtVUhhu6MEbouTbUIGwlOlfvHo` | ✓ | Google Sheet ID |
-| `SHEET_NAME` | `Sheet1` | ✓ | Tab with login credentials |
-| `TRACKER_SHEET_NAME` | `youtube_tracker` | ✓ | Tab with tracker rows |
-| `CHANNELS_SHEET_NAME` | `channels` | ✓ | Tab with channel dropdown options |
-| `GOOGLE_CREDENTIALS_JSON` | `{"type":"service_account",...}` | ✓ | Full service account JSON as a single-line string |
-| `JWT_SECRET` | 48 random url-safe bytes | ✓ | Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. **Rotate to log everyone out.** |
-| `ALLOWED_ORIGINS` | `https://i3-space.pages.dev,http://localhost:5173` | ✓ | Comma-separated CORS allowlist |
-| `ALLOW_PAGES_PREVIEWS` | `true` (default) | – | Allows any `*.pages.dev` origin (Cloudflare Pages previews). Set to `false` once a stable custom domain is in place. |
-| `LOGIN_RATE_LIMIT` | `5/minute` (default) | – | Per-IP slowapi limit on `/auth/login` |
-| `JWT_EXPIRES_SECONDS` | `604800` (default = 7 days) | – | Token lifetime in seconds |
-| `LOG_LEVEL` | `INFO` (default) | – | `DEBUG`, `INFO`, `WARNING`, etc. |
-| `APP_ENV` | `production` | – | Tagged on every Sentry event and logged at startup |
-| `APP_VERSION` | `0.2.0` | – | Surfaced via `/healthz` and Sentry releases |
-| `SENTRY_DSN` | DSN from Sentry project | – | Leave unset to disable Sentry entirely |
-| `SENTRY_TRACES_SAMPLE_RATE` | `0.05` (default) | – | 5% transaction sampling |
+The Cloudflare Pages project is connected directly to the GitHub repo. Every push to `main` that touches `frontend/**` triggers an automatic build and deployment — no manual step needed.
 
-> **CORS note:** when `ALLOW_PAGES_PREVIEWS=true` (default) the backend also accepts any `https://*.pages.dev` origin via regex, which covers all Cloudflare Pages preview deployments. Set it to `false` once you have a stable custom domain so preview URLs can't reach the API.
+Build settings in Cloudflare Pages dashboard:
+- **Build command:** `npm run build`
+- **Build output directory:** `dist`
+- **Root directory:** `frontend`
+- **Environment variable:** `VITE_API_URL=https://i3space-backend.whitepond-61860c90.canadacentral.azurecontainerapps.io`
 
-### Updating environment variables
+---
 
-1. Go to [Railway project variables](https://railway.com/project/a0520d55-d84a-4ad8-bb56-1985c5faf46e/service/f4ebcabb-e99c-4023-b9ae-6f03e0e79bc1/variables)
-2. Click **Raw Editor**, update values, click **Update Variables**
-3. Click **Deploy** to apply — Railway will redeploy automatically
+## Backend — Container App details
 
-### Health checks
+| Setting | Value |
+|---|---|
+| Container App name | `i3space-backend` |
+| Resource group | `rg-shared-prod` |
+| Region | Canada Central |
+| Image | `i3spacecr.azurecr.io/i3space-backend:latest` |
+| Ingress | External, port 8080 |
+| Min replicas | 0 (scales to zero when idle) |
 
-| Endpoint | Use | Response |
+### Environment variables (set in Container App secrets/env)
+
+| Variable | Required | Notes |
 |---|---|---|
-| `GET /healthz` | Uptime monitor + version reporting | `{"status":"ok","version":"0.2.0","environment":"production"}` |
-| `GET /health` | Legacy alias kept for existing monitors | `{"status":"ok"}` |
+| `DATABASE_URL` | ✓ | `postgresql://user:pass@i3-postgressqldb.postgres.database.azure.com/i3space` — kept in Container App secrets |
+| `AZURE_AD_TENANT_ID` | ✓ | `d1aec0dc-1c2b-4541-9724-3a6f21519d9e` |
+| `AZURE_AD_CLIENT_ID` | ✓ | `0b7fb923-f379-4245-b319-a9c1725af4f5` |
+| `ALLOWED_ORIGINS` | ✓ | `https://i3-space.pages.dev,http://localhost:5173` |
+| `ALLOW_PAGES_PREVIEWS` | – | `true` (default) — allows any `*.pages.dev` origin. Set to `false` once a custom domain is used. |
+| `INITIAL_USER_EMAIL` | – | Seeds the first user row in PostgreSQL on cold start if the `users` table is empty. Unused after first start. |
+| `INITIAL_USER_PASSWORD` | – | Paired with `INITIAL_USER_EMAIL`. |
+| `LOG_LEVEL` | – | `INFO` (default) |
+| `APP_ENV` | – | `production` |
+| `APP_VERSION` | – | `0.3.0` |
+| `SENTRY_DSN` | – | Leave unset to disable Sentry |
+| `LOGIN_RATE_LIMIT` | – | `5/minute` (default) — legacy guard; no `/auth/login` endpoint exists anymore |
+
+To update: Azure Portal → Container Apps → `i3space-backend` → Environment variables → Edit → Save → Create new revision.
+
+### Health endpoints
+
+| Endpoint | Response |
+|---|---|
+| `GET /healthz` | `{"status":"ok","version":"0.3.0","environment":"production"}` |
+| `GET /health` | `{"status":"ok"}` (legacy alias) |
 
 ```bash
-curl https://comfortable-patience-production-82bf.up.railway.app/healthz
+BASE=https://i3space-backend.whitepond-61860c90.canadacentral.azurecontainerapps.io
+curl "$BASE/healthz"
 ```
 
 ---
 
-## Frontend — Cloudflare Pages
-
-### First-time setup (already done)
-
-1. Created API token `i3-space-pages-deploy` (Cloudflare Pages: Edit) at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Created Pages project via API: `POST /accounts/{account_id}/pages/projects` with `{"name":"i3-space","production_branch":"main"}`
-3. Installed Wrangler as a dev dependency: `npm install -D wrangler`
-4. Added `public/_redirects` for SPA client-side routing (replaces `vercel.json`)
-
-### Deploying
-
-```bash
-cd frontend
-
-# Build with production backend URL baked in
-VITE_API_URL=https://comfortable-patience-production-82bf.up.railway.app npx vite build
-
-# Deploy to Cloudflare Pages
-CLOUDFLARE_API_TOKEN=<CF_PAGES_API_TOKEN from tokens sheet> \
-CLOUDFLARE_ACCOUNT_ID=7f4d7445fc8a8d69af528bec10ef6d02 \
-npx wrangler pages deploy dist --project-name i3-space --branch main
-```
-
-Wrangler uploads the `dist/` folder directly — no build step on Cloudflare's servers. Client-side routing is handled by `public/_redirects`:
-
-```
-/*    /index.html   200
-```
-
-### Environment variables
-
-`VITE_API_URL` is injected **at build time** by Vite (it becomes a compile-time constant in the JS bundle). Pass it via the `VITE_API_URL` environment variable before running `vite build`.
-
-The value is also stored in the Cloudflare Pages project settings (for reference), but since Cloudflare Pages doesn't run the build step in our workflow, the env var must be set locally at build time.
-
-To change the backend URL in future:
-
-```bash
-VITE_API_URL=https://your-new-backend.up.railway.app npx vite build
-CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=7f4d7445fc8a8d69af528bec10ef6d02 \
-  npx wrangler pages deploy dist --project-name i3-space --branch main
-```
-
-### Cloudflare Pages project details
+## Frontend — Cloudflare Pages details
 
 | Field | Value |
 |---|---|
 | Project name | `i3-space` |
-| Account | `Sahil@i3institute.ca's Account` (`7f4d7445fc8a8d69af528bec10ef6d02`) |
+| Account | Sahil@i3institute.ca's Account (`7f4d7445fc8a8d69af528bec10ef6d02`) |
 | Production URL | https://i3-space.pages.dev |
 | Dashboard | https://dash.cloudflare.com/7f4d7445fc8a8d69af528bec10ef6d02/pages/view/i3-space |
+| GitHub repo | `Sahilvohra58/i3-space`, branch `main` |
 
 ---
 
-## Redeploying in future
+## Database
 
-### First-time production cut-over to v0.2 (hardened build)
+**PostgreSQL Flexible Server** — VNet-private only. No public access is enabled and it must stay that way.
 
-Run these once when promoting the new hardened code to production. Subsequent deploys can skip steps 1–2.
-
-1. **Set the new required env vars on Railway** (see [Environment variables](#environment-variables-set-in-railway-dashboard)):
-   - `JWT_SECRET` — generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`
-   - Confirm `ALLOWED_ORIGINS` includes `https://i3-space.pages.dev`.
-   - Optional: `SENTRY_DSN` if wiring up Sentry now.
-2. **Hash existing passwords in `Sheet1`** (one-time, idempotent):
-   ```bash
-   cd backend
-   source .venv/bin/activate
-   python -m scripts.migrate_passwords          # dry-run, shows what will change
-   python -m scripts.migrate_passwords --apply  # actually writes hashes
-   ```
-3. **Deploy backend, then frontend** (commands below).
-
-### Backend change
-
-```bash
-cd backend
-
-# Make your code changes, then:
-RAILWAY_TOKEN=<RAILWAY_PROJECT_TOKEN from tokens sheet> \
-  railway up --detach --service f4ebcabb-e99c-4023-b9ae-6f03e0e79bc1
-```
-
-### Frontend change
-
-```bash
-cd frontend
-
-VITE_API_URL=https://comfortable-patience-production-82bf.up.railway.app npx vite build
-
-CLOUDFLARE_API_TOKEN=<CF_PAGES_API_TOKEN from tokens sheet> \
-CLOUDFLARE_ACCOUNT_ID=7f4d7445fc8a8d69af528bec10ef6d02 \
-npx wrangler pages deploy dist --project-name i3-space --branch main
-```
-
-### Both at once
-
-```bash
-# From repo root
-cd backend && RAILWAY_TOKEN=<token> railway up --detach --service f4ebcabb-e99c-4023-b9ae-6f03e0e79bc1
-
-cd ../frontend
-VITE_API_URL=https://comfortable-patience-production-82bf.up.railway.app npx vite build
-CLOUDFLARE_API_TOKEN=<CF_PAGES_API_TOKEN> CLOUDFLARE_ACCOUNT_ID=7f4d7445fc8a8d69af528bec10ef6d02 \
-  npx wrangler pages deploy dist --project-name i3-space --branch main
-```
-
----
-
-## Google Sheets data store
-
-The app uses a single Google Sheet as its database. All sheet access goes through a **service account** (`i3-space-tracker@eat-ingredient.iam.gserviceaccount.com`).
-
-| Tab | Purpose |
+| Setting | Value |
 |---|---|
-| `Sheet1` | Login credentials (email + password) |
-| `youtube_tracker` | YouTube tracker rows |
-| `volunteers_tracker` | Human Resources snapshot rows — volunteer metrics (active count, time-to-fill, churn), engagement metrics (NPS, training participation), and process metrics (roles with KPIs, review completion, mentorship participation) |
-| `channels` | Channel options for the tracker dropdown |
-| `tokens` | Deployment tokens and secrets |
+| Server name | `i3-postgressqldb.postgres.database.azure.com` |
+| Database | `i3space` |
+| VNet | `VNET1`, subnet `default` |
+| Public access | **Disabled** |
 
-> Category trackers (`loyalty_tracker`, `outreach_tracker`, `business_tracker`, `sponsorships_tracker`, `media_sales_tracker`, `team_tracker`) follow the same auto-create-on-first-GET convention as `volunteers_tracker`.
-
-### Service account credentials
-
-- **Project:** `eat-ingredient` (Google Cloud)
-- **Service account:** `i3-space-tracker@eat-ingredient.iam.gserviceaccount.com`
-- **Key file (local dev):** `backend/credentials/service_account.json`
-- **Production:** stored as `GOOGLE_CREDENTIALS_JSON` env var on Railway (single-line JSON)
-
-The backend automatically uses the env var in production and falls back to the local file for development (see `backend/app/services/tracker_sheets.py`).
+Tables created automatically on startup: `users`, `channels`, `tracker_rows`, `business_snapshots`, `loyalty_snapshots`, `outreach_snapshots`, `sponsorship_snapshots`, `media_sales_snapshots`, `team_snapshots`, `volunteer_snapshots`.
 
 ---
 
-## Cold start mitigation
+## Tokens & secrets
 
-Railway's Trial plan may sleep idle containers. Options to keep the backend warm:
+Sensitive credentials are stored in **Azure Container Apps secrets** (visible in the Azure portal under `i3space-backend → Secrets`). Non-sensitive reference info:
 
-1. **UptimeRobot (free):** ping `https://comfortable-patience-production-82bf.up.railway.app/health` every 5 minutes
-2. **Frontend pre-warm:** the login page fires a silent `GET /health` on mount so the container is awake by the time the user clicks Sign In
-3. **Upgrade to Railway Hobby ($5/mo):** services never sleep; the $5 free trial credit covers the first month
+| Key | Value |
+|---|---|
+| `CF_ACCOUNT_ID` | `7f4d7445fc8a8d69af528bec10ef6d02` |
+| `CF_PAGES_PROJECT_NAME` | `i3-space` |
+| `AZURE_AD_TENANT_ID` | `d1aec0dc-1c2b-4541-9724-3a6f21519d9e` |
+| `AZURE_AD_CLIENT_ID` | `0b7fb923-f379-4245-b319-a9c1725af4f5` |
+| ACR login server | `i3spacecr.azurecr.io` |
 
 ---
 
@@ -318,19 +189,11 @@ Railway's Trial plan may sleep idle containers. Options to keep the backend warm
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Login fails with CORS error | New Pages URL not whitelisted | Already handled by `allow_origin_regex` for `*.pages.dev`; check `ALLOWED_ORIGINS` for non-Cloudflare origins |
-| `{"detail": "Could not fetch..."}` on tracker | `GOOGLE_CREDENTIALS_JSON` malformed or missing | Re-paste the single-line JSON in Railway variables |
-| Backend returns 502 | Service crashed on startup | Check deploy logs in Railway dashboard |
-| Frontend shows blank page | `VITE_API_URL` not set at build time | Rebuild with `VITE_API_URL=... npx vite build` then redeploy |
-| `railway up` → "Unauthorized" | Wrong token | Get `RAILWAY_PROJECT_TOKEN` from the `tokens` sheet in Google Sheets |
-| Login succeeds but every other request → 401 | `JWT_SECRET` env var changed (or unset) after a token was issued | Sign in again; if mid-deploy, set `JWT_SECRET` and redeploy |
-| All users get 401 the morning after deploy | JWT expired (default 7 days) | Sign in again; raise `JWT_EXPIRES_SECONDS` if too short |
-| `429 Too Many Requests` on login | Hit the `LOGIN_RATE_LIMIT` (default 5/min/IP) | Wait 60s; or raise `LOGIN_RATE_LIMIT` if a shared NAT IP serves many users |
-| `plaintext_password_compare` in logs | A user row in `Sheet1` still has a plaintext password | Re-run `python -m scripts.migrate_passwords --apply` |
-| Logs are unstructured plain text | Old build still deployed | Confirm v0.2 image is running — startup line should be a JSON object with `event: app_startup` |
-
-
-Frontend: https://i3-space.pages.dev
-
-
-Backend: https://comfortable-patience-production-82bf.up.railway.app
+| "Need admin approval" on login | Mujtaba hasn't completed one-time admin consent | Share the consent URL from `adding-users.md` with Mujtaba |
+| "You don't have access" on login | User not assigned in Enterprise App | Azure Portal → Enterprise Apps → i3space-app → Users and groups → Add |
+| `401 {"detail": "Invalid or expired token"}` | Azure AD token expired or audience mismatch | Sign out and sign back in; check `AZURE_AD_CLIENT_ID` and `AZURE_AD_TENANT_ID` env vars |
+| `401 {"detail": "Missing bearer token"}` | Axios interceptor failed to attach token | Check browser console for MSAL errors; try signing out and back in |
+| CORS error in browser | Frontend origin not in `ALLOWED_ORIGINS` | Update the Container App env var to include the new origin |
+| Backend returns 502 | Container App crash on startup | Check Container App logs: Azure Portal → i3space-backend → Log stream |
+| Container App shows old code | Forgot the `az containerapp update` step after CI push | Run `az containerapp update --name i3space-backend --resource-group rg-shared-prod --image i3spacecr.azurecr.io/i3space-backend:latest` |
+| Frontend shows old version after push | Cloudflare Pages build failed | Check Cloudflare Pages dashboard for build errors |

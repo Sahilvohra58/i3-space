@@ -1,7 +1,7 @@
 """Structured JSON logging configuration.
 
 Call `configure_logging()` once at startup. Every log record will be emitted as
-a single-line JSON object that Railway / DataDog / BetterStack can parse
+a single-line JSON object that Azure Log stream / BetterStack can parse
 without regex gymnastics.
 
 Each record includes a request_id when emitted from within an HTTP request
@@ -70,6 +70,6 @@ def configure_logging() -> None:
     # Quiet a few chatty libraries; we keep access logging at INFO via uvicorn
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
-    logging.getLogger("gspread").setLevel(logging.WARNING)
+
 
     _CONFIGURED = True
