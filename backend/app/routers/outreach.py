@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.outreach import NewOutreachSnapshot, OutreachSnapshot
-from app.services import outreach_sheets
+from app.services import outreach_db as outreach_sheets
 
 router = APIRouter(prefix="/outreach", tags=["outreach"])
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.volunteers import NewVolunteerSnapshot, VolunteerSnapshot
-from app.services import volunteer_sheets
+from app.services import volunteer_db as volunteer_sheets
 
 router = APIRouter(prefix="/volunteers", tags=["volunteers"])
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.sponsorships import NewSponsorshipSnapshot, SponsorshipSnapshot
-from app.services import sponsorships_sheets
+from app.services import sponsorships_db as sponsorships_sheets
 
 router = APIRouter(prefix="/sponsorships", tags=["sponsorships"])
 

@@ -122,9 +122,17 @@ def health_legacy():
     return {"status": "ok"}
 
 
-# ─── Startup banner ──────────────────────────────────────────────────────────
+# ─── Startup ─────────────────────────────────────────────────────────────────
 @app.on_event("startup")
-def _startup_log():
+def _startup():
+    from app.database import Base, engine, ensure_database_exists
+    from app.services.auth_db import seed_initial_user
+    import app.orm_models  # noqa: F401 — registers all ORM classes with Base
+
+    ensure_database_exists()
+    Base.metadata.create_all(engine)
+    seed_initial_user()
+
     logger.info(
         "app_startup",
         extra={

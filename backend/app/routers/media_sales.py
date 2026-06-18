@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.media_sales import NewMediaSalesSnapshot, MediaSalesSnapshot
-from app.services import media_sales_sheets
+from app.services import media_sales_db as media_sales_sheets
 
 router = APIRouter(prefix="/media-sales", tags=["media-sales"])
 

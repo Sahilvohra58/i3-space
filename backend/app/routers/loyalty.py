@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.loyalty import NewLoyaltySnapshot, LoyaltySnapshot
-from app.services import loyalty_sheets
+from app.services import loyalty_db as loyalty_sheets
 
 router = APIRouter(prefix="/loyalty", tags=["loyalty"])
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.business import NewBusinessSnapshot, BusinessSnapshot
-from app.services import business_sheets
+from app.services import business_db as business_sheets
 
 router = APIRouter(prefix="/business", tags=["business"])
 

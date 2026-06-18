@@ -7,11 +7,11 @@ The i3 Space app is split into two independently deployed services:
 | Layer | Platform | URL |
 |---|---|---|
 | Frontend (React/Vite) | Cloudflare Pages | https://i3-space.pages.dev |
-| Backend (FastAPI) | Railway | https://comfortable-patience-production-82bf.up.railway.app |
+| Backend (FastAPI) | Azure Container Apps | https://i3space-backend.whitepond-61860c90.canadacentral.azurecontainerapps.io |
 
-All secrets and deployment tokens are stored in the **`tokens` sheet** of the Google Sheet `i3-space-credentials`. See [Secrets & Token Storage](#secrets--token-storage) for details.
+> **v0.3 — Azure migration:** Backend moved from Railway + Google Sheets to Azure Container Apps + Azure PostgreSQL Flexible Server (private VNet). The database is `i3space` on server `i3-postgressqldb.postgres.database.azure.com`, reachable only within `VNET1` (subnet `default`). Container Apps run in the same VNet (subnet `container-apps`), so they reach the DB privately. Image is stored in ACR (`i3spacecr.azurecr.io`). All secrets live in Azure Container Apps secret store; see the Azure portal for the Container App `i3space-backend` in resource group `rg-shared-prod`.
 
-> **Production hardening (v0.2):** Passwords are bcrypt-hashed in Sheet1, the backend issues JWT bearer tokens (7-day expiry), every data route requires `Authorization: Bearer <token>`, `/auth/login` is rate-limited to 5/min/IP, structured JSON logs include a request-id, and Sentry is plug-in-ready. See [Authentication & security](#authentication--security) below for details.
+> **Production hardening (v0.2):** Passwords are bcrypt-hashed, the backend issues JWT bearer tokens (7-day expiry), every data route requires `Authorization: Bearer <token>`, `/auth/login` is rate-limited to 5/min/IP, structured JSON logs include a request-id, and Sentry is plug-in-ready.
 
 ---
 
@@ -24,13 +24,18 @@ User Browser
 Cloudflare Pages (frontend)           ← static React/Vite build, global CDN
     │   HTTPS requests
     ▼
-Railway (backend FastAPI)             ← Python, Uvicorn, port $PORT
+Azure Container Apps (backend)        ← FastAPI, Uvicorn, port 8080
+    │   • VNet-integrated (VNET1/container-apps subnet)
     │   • JWT verify on every protected route
     │   • slowapi rate-limits /auth/login
     │   • JSON logs with request_id
+    │   private TCP (port 5432)
     ▼
-Google Sheets (i3-space-credentials)  ← data store: bcrypt-hashed users,
-                                        trackers, snapshots, channels
+Azure PostgreSQL Flexible Server      ← private, VNet-only (VNET1/default subnet)
+    │   Database: i3space
+    │   Tables: users, channels, tracker_rows, business_snapshots,
+    │           loyalty_snapshots, outreach_snapshots, sponsorship_snapshots,
+    │           media_sales_snapshots, team_snapshots, volunteer_snapshots
 ```
 
 ---
@@ -40,7 +45,7 @@ Google Sheets (i3-space-credentials)  ← data store: bcrypt-hashed users,
 ### Login flow
 
 1. User POSTs `{email, password}` to `/auth/login`.
-2. Backend reads the row from `Sheet1`, verifies the password against the bcrypt hash in column B, and on success issues a JWT signed with `JWT_SECRET` (HS256, 7-day expiry by default).
+2. Backend queries the `users` table in PostgreSQL, verifies the password against the bcrypt hash, and on success issues a JWT signed with `JWT_SECRET` (HS256, 7-day expiry by default).
 3. Frontend stores the JWT in `localStorage` (`i3.access_token`).
 4. Every subsequent request is sent with `Authorization: Bearer <token>` by a shared axios interceptor (`frontend/src/api/client.ts`).
 5. Any backend response with status `401` triggers the frontend to clear the session and bounce back to the login page.
@@ -58,23 +63,15 @@ A missing or invalid token returns `401 {"detail": "Missing bearer token"}` or `
 
 ### Password storage
 
-Passwords live in `Sheet1` column B as bcrypt hashes (`$2b$12$...`). The verifier (`app/services/sheets.py`) accepts either a bcrypt hash or — as a one-time migration bridge — a legacy plaintext value, and logs a `plaintext_password_compare` warning whenever it falls back to plaintext. Once `scripts/migrate_passwords.py --apply` has been run, every row is hashed and the bridge becomes unreachable.
+Passwords are bcrypt-hashed and stored in the `users` table in PostgreSQL (`email`, `password_hash` columns). On first startup the backend seeds the initial user from `INITIAL_USER_EMAIL` / `INITIAL_USER_PASSWORD` environment variables (set in the Container App secrets in the Azure portal).
 
 ### Rotating the JWT secret
 
-Setting a new `JWT_SECRET` on Railway and redeploying invalidates every outstanding token (everyone is forced to log in again). Useful if you suspect a token was leaked or you want to terminate all sessions.
+Update the `jwt-secret` secret in the Container App and create a new revision. This invalidates all outstanding tokens (everyone is forced to log in again).
 
 ### Adding a user
 
-Add a row to `Sheet1` with the email in column A and a *plaintext password* in column B, then re-run the migrator to hash it:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m scripts.migrate_passwords --apply
-```
-
-The script is idempotent — it only touches rows whose password cell isn't already a bcrypt hash.
+Currently done via direct SQL on the PostgreSQL server (accessible from within the VNet). A future admin endpoint can be added to the API.
 
 ---
 

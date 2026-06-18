@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from app.models.tracker import NewTrackerRow, TrackerRow
-from app.services import tracker_sheets
+from app.services import tracker_db as tracker_sheets
 
 router = APIRouter(prefix="/tracker", tags=["tracker"])
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.models.team import NewTeamSnapshot, TeamSnapshot
-from app.services import team_sheets
+from app.services import team_db as team_sheets
 
 router = APIRouter(prefix="/team", tags=["team"])
 

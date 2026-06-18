@@ -8,7 +8,7 @@ from app.dependencies.auth import require_user
 from app.models.auth import LoginRequest, LoginResponse
 from app.rate_limit import limiter
 from app.services.jwt_service import issue_token
-from app.services.sheets import verify_credentials
+from app.services.auth_db import verify_credentials
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
