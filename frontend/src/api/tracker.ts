@@ -32,3 +32,7 @@ export async function getChannels(): Promise<string[]> {
   const { data } = await api.get<string[]>("/tracker/channels");
   return data;
 }
+
+export async function addChannel(name: string): Promise<void> {
+  await api.post("/tracker/channels", { name });
+}

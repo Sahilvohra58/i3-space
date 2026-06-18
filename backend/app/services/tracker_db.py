@@ -35,3 +35,10 @@ def delete_row(row_index: int) -> None:
 def get_channels() -> list[str]:
     with SessionLocal() as session:
         return [c.name for c in session.query(Channel).order_by(Channel.name).all()]
+
+
+def add_channel(name: str) -> None:
+    with SessionLocal() as session:
+        if not session.query(Channel).filter(Channel.name == name).first():
+            session.add(Channel(name=name))
+            session.commit()

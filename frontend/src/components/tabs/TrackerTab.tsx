@@ -4,6 +4,7 @@ import {
   addTrackerRow,
   deleteTrackerRow,
   getChannels,
+  addChannel,
   type TrackerRow,
   type NewTrackerRow,
 } from "../../api/tracker";
@@ -26,6 +27,8 @@ export default function TrackerTab() {
   const [form, setForm] = useState<NewTrackerRow>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
 
   const fetchRows = async () => {
     setLoading(true);
@@ -63,6 +66,21 @@ export default function TrackerTab() {
       setError("Failed to add entry.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAddChannel = async () => {
+    const name = newChannelName.trim();
+    if (!name) return;
+    try {
+      await addChannel(name);
+      setChannels((prev) => [...prev, name].sort());
+      setForm((f) => ({ ...f, channel_name: name }));
+    } catch {
+      setError("Failed to add channel.");
+    } finally {
+      setNewChannelName("");
+      setAddingChannel(false);
     }
   };
 
@@ -144,17 +162,56 @@ export default function TrackerTab() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Channel Name</label>
-            <select
-              required
-              value={form.channel_name}
-              onChange={(e) => setForm({ ...form, channel_name: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-            >
-              <option value="" disabled>Select a channel…</option>
-              {channels.map((ch) => (
-                <option key={ch} value={ch}>{ch}</option>
-              ))}
-            </select>
+            {addingChannel ? (
+              <div className="flex gap-1">
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Channel name"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); handleAddChannel(); }
+                    if (e.key === "Escape") { setAddingChannel(false); setNewChannelName(""); }
+                  }}
+                  className="flex-1 min-w-0 rounded-lg border border-indigo-400 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddChannel}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 transition"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAddingChannel(false); setNewChannelName(""); }}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 transition"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <select
+                required
+                value={form.channel_name}
+                onChange={(e) => {
+                  if (e.target.value === "__add_new__") {
+                    setAddingChannel(true);
+                    setForm({ ...form, channel_name: "" });
+                  } else {
+                    setForm({ ...form, channel_name: e.target.value });
+                  }
+                }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+              >
+                <option value="" disabled>Select a channel…</option>
+                {channels.map((ch) => (
+                  <option key={ch} value={ch}>{ch}</option>
+                ))}
+                <option value="__add_new__">+ Add channel</option>
+              </select>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Views</label>
