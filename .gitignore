@@ -49,7 +49,6 @@ pnpm-debug.log*
 .railway/
 backups/
 .playwright-mcp/
-.codebase-memory/
 
 # Local screenshots from tests
 board-with-sample-data.png
