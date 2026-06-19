@@ -4,17 +4,9 @@ Access to [i3-space.pages.dev](https://i3-space.pages.dev) is controlled through
 
 ---
 
-## Step 1 — One-time setup (Mujtaba only, done once)
+## Step 1 — One-time setup (done ✓)
 
-Before any user can sign in, a Global Admin needs to approve the app for the i3 Institute tenant.
-
-Ask Mujtaba to visit this link while signed into his i3 Institute Microsoft account and click **Accept**:
-
-```
-https://login.microsoftonline.com/d1aec0dc-1c2b-4541-9724-3a6f21519d9e/adminconsent?client_id=0b7fb923-f379-4245-b319-a9c1725af4f5&redirect_uri=https://i3-space.pages.dev
-```
-
-It only asks for basic profile permissions (name, email). After he approves, Mujtaba doesn't need to be involved again.
+Mujtaba (Global Admin) has approved the app for the i3 Institute tenant. This step does not need to be repeated.
 
 ---
 

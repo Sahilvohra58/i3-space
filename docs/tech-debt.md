@@ -1,22 +1,6 @@
 # Tech Debt
 
-Outstanding work items ordered by priority. Items marked **blocking** prevent users from logging in.
-
----
-
-## Blocking
-
-### Mujtaba admin consent
-
-**Status:** Not done — no one can sign in until this is complete.
-
-A Global Admin must approve the `i3space-app` Enterprise Application for the i3 Institute tenant once. Ask Mujtaba to visit this link while signed into his i3 Institute Microsoft account and click **Accept**:
-
-```
-https://login.microsoftonline.com/d1aec0dc-1c2b-4541-9724-3a6f21519d9e/adminconsent?client_id=0b7fb923-f379-4245-b319-a9c1725af4f5&redirect_uri=https://i3-space.pages.dev
-```
-
-After he approves once, Sahil can manage user assignments himself without Mujtaba's involvement.
+Outstanding work items ordered by priority.
 
 ---
 
