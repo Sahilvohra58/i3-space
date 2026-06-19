@@ -49,17 +49,28 @@ Backend emits JSON logs to stdout. Currently only visible via Azure Portal → i
 
 ## Infrastructure
 
-### Custom domain
+### Custom domain — `space.i3institute.ca`
 
-`i3-space.pages.dev` is fine for now but a real domain (e.g. `app.i3institute.ca`) is better for user trust and future-proofs against Cloudflare preview URL changes.
+Target domain is `space.i3institute.ca`. DNS is managed by IT (likely GoDaddy — `i3institute.ca` is not in Cloudflare). Waiting on IT DNS access.
 
-Steps:
-1. Add `app.i3institute.ca` in Cloudflare Pages project → Custom domains
-2. Add the CNAME record in DNS (Cloudflare shows the exact value)
-3. Update `ALLOWED_ORIGINS` on the Container App to include the new domain
-4. Update the App Registration redirect URI in Azure Portal (add `https://app.i3institute.ca`)
-5. Set `ALLOW_PAGES_PREVIEWS=false` once the custom domain is stable
-6. Update `docs/deployment.md` with the new URL
+#### DNS record to add in GoDaddy
+
+| Type | Name | Value | TTL |
+|---|---|---|---|
+| CNAME | `space` | `i3-space.pages.dev` | 1 hour |
+
+#### Order of operations (matters)
+
+1. **Cloudflare Pages first** → `i3-space` project → Custom domains → Add `space.i3institute.ca` (Cloudflare starts waiting for the CNAME)
+2. **Then add the CNAME in GoDaddy**
+3. Cloudflare auto-provisions an SSL cert once it detects the record (a few minutes, up to an hour)
+
+#### After the domain is live
+
+4. Azure Portal → App Registration `i3space-app` → Authentication → add `https://space.i3institute.ca` as a redirect URI (SPA)
+5. Container App → update `ALLOWED_ORIGINS` to include `https://space.i3institute.ca`, then create a new revision
+6. Set `ALLOW_PAGES_PREVIEWS=false` once stable
+7. Update `docs/deployment.md` with the new URL
 
 ---
 
